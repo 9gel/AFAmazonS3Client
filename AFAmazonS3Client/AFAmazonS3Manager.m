@@ -194,14 +194,56 @@ NSString * const AFAmazonS3ManagerErrorDomain = @"com.alamofire.networking.s3.er
     [self setObjectWithMethod:@"POST" file:path destinationPath:destinationPath parameters:parameters progress:progress success:success failure:failure];
 }
 
-- (void)putObjectWithFile:(NSString *)path
+- (void)putObjectWithFile:(NSString *)filePath
           destinationPath:(NSString *)destinationPath
                parameters:(NSDictionary *)parameters
                  progress:(void (^)(NSUInteger bytesWritten, long long totalBytesWritten, long long totalBytesExpectedToWrite))progress
                   success:(void (^)(id responseObject))success
                   failure:(void (^)(NSError *error))failure
 {
-    [self setObjectWithMethod:@"PUT" file:path destinationPath:destinationPath parameters:parameters progress:progress success:success failure:failure];
+    NSMutableURLRequest *fileRequest = [NSMutableURLRequest requestWithURL:[NSURL fileURLWithPath:filePath]];
+    [fileRequest setCachePolicy:NSURLCacheStorageNotAllowed];
+
+    NSURLResponse *response = nil;
+    NSError *fileError = nil;
+    NSData *data = [NSURLConnection sendSynchronousRequest:fileRequest returningResponse:&response error:&fileError];
+    if (fileError) {
+        if (failure)
+            failure(fileError);
+        return;
+    }
+
+    if (data && response) {
+        NSError *putError = nil;
+        NSMutableURLRequest *request =
+        [self.requestSerializer requestWithMethod:@"PUT"
+                                        URLString:[[self.baseURL URLByAppendingPathComponent:destinationPath] absoluteString]
+                                       parameters:nil
+                                            error:&putError];
+        if (putError) {
+            if (failure)
+                failure(putError);
+            return;
+        }
+        [request setHTTPBody:data];
+
+        AFHTTPRequestOperation *requestOperation =
+        [self HTTPRequestOperationWithRequest:request
+                                      success:^(__unused AFHTTPRequestOperation *operation, id responseObject) {
+                                          if (success) {
+                                              success(responseObject);
+                                          }
+                                      }
+                                      failure:^(__unused AFHTTPRequestOperation *operation, NSError *error) {
+                                          if (failure) {
+                                              failure(error);
+                                          }
+                                      }];
+
+        [requestOperation setUploadProgressBlock:progress];
+
+        [self.operationQueue addOperation:requestOperation];
+    }
 }
 
 - (void)deleteObjectWithPath:(NSString *)path
